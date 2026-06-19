@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import AuthenticatedLayout from "./layout/AuthenticatedLayout";
-import { ForgotPasswordPage, LoginPage, RegisterPage, TwoFactorPage } from "./pages/AuthPages";
+import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, TwoFactorPage } from "./pages/AuthPages";
 import LandingPage from "./pages/LandingPage";
 import { LoadingSpinner } from "./components/ui";
 
@@ -22,6 +22,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/two-factor" element={<TwoFactorPage />} />
       <Route element={<AuthenticatedLayout />}>
         <Route path="/app" element={<Navigate to="/dashboard" replace />} />

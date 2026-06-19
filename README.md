@@ -1,112 +1,108 @@
 # Finance AI
 
-Aplicação web de gestão financeira pessoal e empresarial com recursos de inteligência artificial. O projeto reúne controle de receitas e despesas, contas a pagar e receber, orçamentos, metas, relatórios e previsões financeiras em uma interface responsiva.
+Aplicação de gestão financeira com frontend React, API REST em Go e PostgreSQL. O ambiente completo é executado com Docker Compose e os dados das telas vêm exclusivamente da API — não há seed de saldos ou lançamentos fictícios.
 
-![Finance AI](public/assets/financeai-wordmark.png)
+## Rodar frontend + backend + banco
 
-## Funcionalidades
-
-- Landing page com apresentação do produto, recursos e planos
-- Login, cadastro, recuperação de senha e verificação 2FA
-- Dashboard com indicadores, gráficos e alertas financeiros
-- Cadastro, filtros, importação e gestão de transações
-- Controle de contas a pagar e receber
-- Orçamentos mensais por categoria
-- Metas financeiras e acompanhamento de progresso
-- Relatórios DRE, fluxo por categoria e evolução anual
-- Assistente financeiro com previsões e recomendações
-- Configurações de perfil, foto, alertas, licença e segurança
-- Layout responsivo com sidebar recolhível e navegação mobile
-
-## Tecnologias
-
-- React 18
-- TypeScript
-- Vite
-- Tailwind CSS
-- React Router DOM
-- Recharts
-- Lucide React
-
-## Requisitos
-
-- Node.js 20 ou superior
-- npm 10 ou superior
-
-## Instalação
+Requisitos: Docker Desktop com Docker Compose.
 
 ```bash
-git clone <URL_DO_REPOSITORIO>
-cd Finance-AI
-npm install
-npm run dev
+cp .env.example .env
+docker compose up --build
 ```
 
-No PowerShell, caso a política de execução bloqueie `npm.ps1`, utilize:
+No PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
+
+Depois do healthcheck dos três serviços:
+
+- Aplicação: http://localhost:3000
+- API: http://localhost:8080/api/v1
+- Healthcheck: http://localhost:8080/health
+- PostgreSQL: `localhost:5432`
+
+Na primeira execução, crie um usuário pela tela de cadastro. A migration é aplicada automaticamente pelo backend e somente as categorias padrão são criadas. Contas, saldos, lançamentos, metas e demais dados começam vazios.
+
+Para encerrar:
+
+```bash
+docker compose down
+```
+
+Para também apagar o volume do banco e recomeçar do zero:
+
+```bash
+docker compose down -v
+```
+
+## Desenvolvimento local
+
+### Frontend
+
+Requer Node.js 20+ e uma API disponível na porta 8080.
 
 ```powershell
 npm.cmd install
 npm.cmd run dev
 ```
 
-A aplicação ficará disponível normalmente em `http://localhost:5173`.
+O Vite abre em http://localhost:5173 e encaminha `/api` para `http://localhost:8080`.
 
-## Scripts
+### Backend
+
+Requer Go 1.23+ e PostgreSQL. É possível subir somente o banco com:
 
 ```bash
-npm run dev      # servidor de desenvolvimento
-npm run build    # valida o TypeScript e gera o build de produção
-npm run preview  # serve localmente o build de produção
+docker compose up postgres
 ```
 
-## Rotas principais
+Configure as variáveis e execute:
 
-| Rota | Descrição |
-| --- | --- |
-| `/` | Landing page |
-| `/login` | Autenticação |
-| `/register` | Criação de conta |
-| `/dashboard` | Visão financeira geral |
-| `/transacoes` | Gestão de transações |
-| `/contas-pagar-receber` | Contas a pagar e receber |
-| `/orcamento` | Orçamento por categoria |
-| `/metas` | Metas financeiras |
-| `/relatorios` | Relatórios financeiros |
-| `/ia` | Assistente financeiro |
-| `/configuracoes` | Perfil, segurança e licença |
+```powershell
+$env:DATABASE_URL="postgres://finance_user:change_this_database_password@localhost:5432/finance_app?sslmode=disable"
+$env:JWT_SECRET="uma-chave-local-com-pelo-menos-32-caracteres"
+Set-Location backend
+go run ./cmd/api
+```
+
+## Validação
+
+```powershell
+npm.cmd run build
+cd backend
+go test ./...
+go vet ./...
+```
 
 ## Estrutura
 
 ```text
+backend/
+  cmd/api/             inicialização da API
+  internal/config/     configuração por ambiente
+  internal/database/   pool PostgreSQL
+  internal/httpapi/    módulos e handlers REST
+  internal/security/   senha, JWT e tokens
+  migrations/          schema SQL versionado
 src/
-  components/   Componentes compartilhados e feedback visual
-  data/         Dados mockados para desenvolvimento
-  layout/       Layout autenticado e navegação
-  lib/          Formatação e utilitários locais
-  pages/        Páginas e fluxos da aplicação
-public/assets/  Logos e imagens públicas
-Docs/           Requisitos e especificações do projeto
+  lib/api.ts           cliente HTTP e renovação de sessão
+  pages/               telas integradas à API
+docker-compose.yml     frontend + backend + PostgreSQL
 ```
 
-## Persistência e backend
+## Segurança e operação
 
-O frontend utiliza dados mockados e estado local enquanto a API está em desenvolvimento. A foto de perfil é armazenada temporariamente no `localStorage` e já está preparada para futura sincronização com o backend.
+- Troque `JWT_SECRET` e `POSTGRES_PASSWORD` antes de produção.
+- Senhas usam bcrypt; refresh tokens e tokens de recuperação são persistidos somente como hash.
+- As rotas privadas validam JWT e todas as consultas financeiras filtram por usuário.
+- O login bloqueia temporariamente após cinco falhas e as rotas sensíveis têm rate limit.
+- O 2FA usa TOTP real e QR Code gerado no backend.
+- O `AI_PROVIDER=local` usa o motor analítico sobre os dados do próprio usuário; nenhuma informação é enviada a terceiros.
 
-A arquitetura planejada utiliza:
+## Integrações externas
 
-- Golang para API REST
-- PostgreSQL para persistência
-- JWT, OAuth 2.0 e TOTP para autenticação
-- Docker e Docker Compose para infraestrutura local
-
-## Build
-
-O projeto possui build de produção validado com TypeScript e Vite:
-
-```bash
-npm run build
-```
-
-## Repositório
-
-Projeto privado: **Finance-AI**.
+O ambiente local funciona sem serviços pagos. OAuth Google/GitHub, envio de e-mail, gateway de licença e exportação PDF/XLSX ficam desativados até que os respectivos provedores e credenciais sejam definidos. A importação CSV e a exportação CSV já são funcionais. Em desenvolvimento, o link de recuperação de senha é emitido somente no log do backend, sem revelar no retorno da API se o e-mail existe.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bar,
   ComposedChart,
@@ -13,30 +13,52 @@ import {
   YAxis,
 } from "recharts";
 import { BarChart3, Plus, RefreshCw, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
-import { accounts, categories, monthly, transactions } from "../data/mock";
-import { Badge, Button, Card, MetricCard, Money, PageHeader, Skeleton } from "../components/ui";
+import { Badge, Button, Card, CurrencyInput, Field, MetricCard, Money, PageHeader, Skeleton, inputClass } from "../components/ui";
 import { formatMoney } from "../lib/format";
+import { api, toDateLabel, type Account, type Bill, type Transaction } from "../lib/api";
+import { Modal, useFeedback } from "../components/feedback";
+
+type DashboardData = {
+  period: string;
+  summary: { balance: number; income: number; expense: number; result: number; account_count: number; income_count: number; expense_count: number };
+  monthly: Array<{ month: string; receita: number; despesa: number; resultado: number }>;
+  categories: Array<{ id: string; name: string; label: string; value: number; color: string }>;
+  accounts: Account[];
+  recent_transactions: Transaction[];
+  upcoming_bills: Bill[];
+  alerts: Array<{ type: string; level: string; title: string; message: string }>;
+};
 
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [initialBalance, setInitialBalance] = useState(0);
+  const { notify } = useFeedback();
 
-  function refresh() {
+  async function refresh() {
     setLoading(true);
-    window.setTimeout(() => setLoading(false), 800);
+    try { setData(await api<DashboardData>("/dashboard/summary")); }
+    catch (error) { notify(error instanceof Error ? error.message : "Falha ao carregar o dashboard.", "error"); }
+    finally { setLoading(false); }
   }
+
+  useEffect(() => { void refresh(); }, []);
+
+  const summary = data?.summary ?? { balance: 0, income: 0, expense: 0, result: 0, account_count: 0, income_count: 0, expense_count: 0 };
+  const monthly = data?.monthly ?? [];
+  const categories = data?.categories ?? [];
+  const accounts = data?.accounts ?? [];
+  const transactions = data?.recent_transactions ?? [];
 
   return (
     <>
       <PageHeader
         title="Dashboard"
-        subtitle="Junho 2025 · Atualizado há 2 min"
+        subtitle={`${new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })} · dados persistidos`}
         actions={
           <>
-            <select className="h-10 rounded-lg border bg-white px-3 text-sm">
-              <option>Este mês</option>
-              <option>Último mês</option>
-              <option>Este ano</option>
-            </select>
+            <span className="inline-flex h-10 items-center rounded-lg border bg-white px-3 text-sm text-slate-600">Mês atual</span>
             <Button variant="ghost" icon={RefreshCw} onClick={refresh}>
               Atualizar
             </Button>
@@ -56,10 +78,10 @@ export default function DashboardPage() {
         </div>
       ) : <div className="transition">
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard title="Saldo Total" value={21279.7} icon={Wallet} footer="3 contas ativas" />
-          <MetricCard title="Receitas do Mês" value={12500} icon={TrendingUp} tone="positive" variation={{ label: "+8,3% vs mês anterior", variant: "positive" }} footer="7 lançamentos" />
-          <MetricCard title="Despesas do Mês" value={8760.3} icon={TrendingDown} tone="negative" variation={{ label: "+12,1% vs mês anterior", variant: "negative" }} footer="34 lançamentos" />
-          <MetricCard title="Resultado do Mês" value={3739.7} icon={BarChart3} variation={{ label: "-2,1% vs mês anterior", variant: "negative" }} footer="Economia 29,9%" />
+          <MetricCard title="Saldo Total" value={summary.balance} icon={Wallet} footer={`${summary.account_count} contas ativas`} />
+          <MetricCard title="Receitas do Mês" value={summary.income} icon={TrendingUp} tone="positive" footer={`${summary.income_count} lançamentos`} />
+          <MetricCard title="Despesas do Mês" value={summary.expense} icon={TrendingDown} tone="negative" footer={`${summary.expense_count} lançamentos`} />
+          <MetricCard title="Resultado do Mês" value={summary.result} icon={BarChart3} footer={summary.income ? `Economia ${((summary.result / summary.income) * 100).toFixed(1)}%` : "Sem receitas no período"} />
         </section>
 
         <section className="mt-6 grid gap-4 xl:grid-cols-[3fr_2fr]">
@@ -74,7 +96,7 @@ export default function DashboardPage() {
                   <Tooltip formatter={(value) => formatMoney(Number(value))} />
                   <Bar dataKey="receita" fill="#10B981" radius={[6, 6, 0, 0]} />
                   <Bar dataKey="despesa" fill="#F87171" radius={[6, 6, 0, 0]} />
-                  <Line type="monotone" dataKey="patrimonio" stroke="#2563EB" strokeWidth={3} dot={{ r: 3, fill: "#2563EB" }} />
+                  <Line type="monotone" dataKey="resultado" stroke="#2563EB" strokeWidth={3} dot={{ r: 3, fill: "#2563EB" }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -119,16 +141,16 @@ export default function DashboardPage() {
               </a>
             </div>
             <div className="mt-4 space-y-3">
-              {["Energia Elétrica", "Aluguel", "Plano Celular", "Financiamento", "Spotify"].map((item, index) => (
-                <div key={item} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              {(data?.upcoming_bills ?? []).map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                   <div>
-                    <p className="font-medium text-slate-900">{item}</p>
-                    <p className="text-xs text-slate-500">{["hoje", "3 dias", "5 dias", "8 dias", "12 dias"][index]}</p>
+                    <p className="font-medium text-slate-900">{item.description}</p>
+                    <p className="text-xs text-slate-500">{toDateLabel(item.due_date)}</p>
                   </div>
                   <div className="text-right">
-                    <Money value={[187.4, 2100, 89.9, 650, 21.9][index]} color={false} />
+                    <Money value={item.amount - item.paid_amount} color={false} />
                     <div className="mt-1">
-                      <Badge variant={index === 0 ? "negative" : index === 1 ? "warning" : index === 2 ? "info" : "neutral"}>{index === 0 ? "Vence hoje" : `${[3, 5, 8, 12][index - 1]} dias`}</Badge>
+                      <Badge variant={item.status === "overdue" ? "negative" : "warning"}>{item.status === "overdue" ? "Vencida" : "Pendente"}</Badge>
                     </div>
                   </div>
                 </div>
@@ -142,14 +164,10 @@ export default function DashboardPage() {
               Alertas Inteligentes
             </h2>
             <div className="mt-4 space-y-3">
-              {[
-                ["Alimentação acima do limite", "Você gastou R$ 1.820 de R$ 1.500 orçados", "negative"],
-                ["Saldo baixo previsto", "Em 8 dias seu saldo pode cair para R$ 4.200", "warning"],
-                ["Meta no prazo", "Reserva de emergência: 68% concluída", "positive"],
-              ].map(([title, description, variant]) => (
-                <button key={title} className="w-full rounded-lg border p-3 text-left hover:bg-slate-50">
-                  <Badge variant={variant as "negative" | "warning" | "positive"}>{title}</Badge>
-                  <p className="mt-2 text-sm text-slate-600">{description}</p>
+              {(data?.alerts ?? []).map((alert) => (
+                <button key={`${alert.type}-${alert.message}`} className="w-full rounded-lg border p-3 text-left hover:bg-slate-50">
+                  <Badge variant={alert.level === "critical" ? "negative" : "warning"}>{alert.title}</Badge>
+                  <p className="mt-2 text-sm text-slate-600">{alert.message}</p>
                 </button>
               ))}
             </div>
@@ -164,16 +182,16 @@ export default function DashboardPage() {
               {accounts.map((account) => (
                 <div key={account.name} className="flex justify-between gap-3 text-sm">
                   <span className="text-slate-600">{account.name}</span>
-                  <Money value={account.balance} />
+                  <Money value={account.current_balance} />
                 </div>
               ))}
             </div>
             <div className="mt-4 border-t pt-4">
               <div className="flex justify-between font-semibold">
                 <span>Saldo consolidado</span>
-                <Money value={21279.7} color={false} />
+                <Money value={summary.balance} color={false} />
               </div>
-              <Button className="mt-3 w-full" variant="ghost" icon={Plus}>
+              <Button className="mt-3 w-full" variant="ghost" icon={Plus} onClick={() => setAccountOpen(true)}>
                 Adicionar conta
               </Button>
             </div>
@@ -199,14 +217,14 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.slice(0, 5).map((transaction) => (
-                  <tr key={transaction.description} className="border-t hover:bg-slate-50">
+                {transactions.map((transaction) => (
+                  <tr key={transaction.id} className="border-t hover:bg-slate-50">
                     <td className="px-3 py-3 font-medium">{transaction.description}</td>
                     <td className="px-3 py-3">
                       <Badge variant="neutral">{transaction.category}</Badge>
                     </td>
                     <td className="px-3 py-3 text-slate-600">{transaction.account}</td>
-                    <td className="px-3 py-3 text-slate-600">{transaction.date}</td>
+                    <td className="px-3 py-3 text-slate-600">{toDateLabel(transaction.date)}</td>
                     <td className="px-3 py-3 text-right">
                       <Money value={transaction.value} signed />
                     </td>
@@ -217,6 +235,14 @@ export default function DashboardPage() {
           </div>
         </Card>
       </div>}
+      <Modal open={accountOpen} title="Adicionar conta financeira" onClose={() => setAccountOpen(false)} footer={<><Button variant="outline" onClick={() => setAccountOpen(false)}>Cancelar</Button><Button type="submit" form="account-form">Salvar conta</Button></>}>
+        <form id="account-form" className="grid gap-4" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); try { await api("/accounts", { method: "POST", body: JSON.stringify({ name: form.get("name"), type: form.get("type"), institution: form.get("institution"), currency: "BRL", initial_balance: initialBalance }) }); setAccountOpen(false); await refresh(); notify("Conta adicionada com sucesso."); } catch (error) { notify(error instanceof Error ? error.message : "Falha ao criar conta.", "error"); } }}>
+          <Field label="Nome"><input name="name" className={inputClass} placeholder="Ex.: Conta corrente" required /></Field>
+          <Field label="Tipo"><select name="type" className={inputClass}><option value="checking">Conta corrente</option><option value="savings">Poupança</option><option value="wallet">Carteira</option><option value="credit_card">Cartão de crédito</option><option value="investment">Investimento</option></select></Field>
+          <Field label="Instituição"><input name="institution" className={inputClass} placeholder="Banco ou instituição" /></Field>
+          <Field label="Saldo inicial"><CurrencyInput onValueChange={setInitialBalance} /></Field>
+        </form>
+      </Modal>
     </>
   );
 }

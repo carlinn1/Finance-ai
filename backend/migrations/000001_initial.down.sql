@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS open_finance_connections, dashboard_widgets, notification_preferences, notifications, licenses, goal_contributions, financial_goals, budgets, bills, ai_chat_messages, ai_chats, ai_category_suggestions, category_rules, imports, transaction_audit_logs, transactions, recurring_transactions, contacts, categories, financial_accounts, password_reset_tokens, refresh_tokens, user_oauth_accounts, users CASCADE;
+DROP FUNCTION IF EXISTS set_updated_at();

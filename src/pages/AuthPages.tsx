@@ -1,9 +1,11 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, Eye, Github, Lock, Mail, Shield, User } from "lucide-react";
 import { Badge, Button, Card, Field, inputClass } from "../components/ui";
 import { cn } from "../lib/format";
 import { BrandLogo } from "../components/BrandLogo";
+import { api, saveTokens } from "../lib/api";
+import { useFeedback } from "../components/feedback";
 
 function BrandMark({ light = false }: { light?: boolean }) {
   if (light) {
@@ -14,10 +16,25 @@ function BrandMark({ light = false }: { light?: boolean }) {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { notify } = useFeedback();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    navigate("/dashboard");
+    setLoading(true);
+    try {
+      const result = await api<{ tokens?: Parameters<typeof saveTokens>[0]; requires_2fa?: boolean; challenge_token?: string }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      if (result.requires_2fa && result.challenge_token) {
+        sessionStorage.setItem("two_factor_challenge", result.challenge_token);
+        navigate("/two-factor");
+        return;
+      }
+      if (result.tokens) saveTokens(result.tokens);
+      navigate("/dashboard");
+    } catch (error) { notify(error instanceof Error ? error.message : "Não foi possível entrar.", "error"); }
+    finally { setLoading(false); }
   }
 
   return (
@@ -53,13 +70,13 @@ export function LoginPage() {
             <Field label="E-mail">
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
-                <input className={cn(inputClass, "pl-10")} type="email" placeholder="joao@exemplo.com.br" />
+                <input className={cn(inputClass, "pl-10")} type="email" placeholder="voce@exemplo.com.br" value={email} onChange={(event) => setEmail(event.target.value)} required />
               </div>
             </Field>
             <Field label="Senha">
               <div className="relative">
                 <Lock className="pointer-events-none absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
-                <input className={cn(inputClass, "pl-10 pr-10")} type="password" placeholder="Sua senha" />
+                <input className={cn(inputClass, "pl-10 pr-10")} type="password" placeholder="Sua senha" value={password} onChange={(event) => setPassword(event.target.value)} required />
                 <Eye className="absolute right-3 top-2.5 h-5 w-5 text-slate-400" />
               </div>
             </Field>
@@ -72,8 +89,8 @@ export function LoginPage() {
                 Esqueci minha senha
               </Link>
             </div>
-            <Button className="h-11 w-full shadow-lg shadow-blue-600/15" type="submit">
-              Entrar
+            <Button className="h-11 w-full shadow-lg shadow-blue-600/15" type="submit" disabled={loading}>
+              {loading ? "Entrando..." : "Entrar"}
             </Button>
             <div className="flex items-center gap-3 text-xs text-slate-400">
               <span className="h-px flex-1 bg-slate-200" />
@@ -81,10 +98,10 @@ export function LoginPage() {
               <span className="h-px flex-1 bg-slate-200" />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Button type="button" variant="outline">
+              <Button type="button" variant="outline" disabled title="Configure OAuth no backend para habilitar">
                 G Google
               </Button>
-              <Button type="button" variant="outline" icon={Github}>
+              <Button type="button" variant="outline" icon={Github} disabled title="Configure OAuth no backend para habilitar">
                 GitHub
               </Button>
             </div>
@@ -103,6 +120,8 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const { notify } = useFeedback();
+  const [loading, setLoading] = useState(false);
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg p-6">
       <Card className="w-full max-w-md shadow-soft">
@@ -115,49 +134,56 @@ export function RegisterPage() {
         </div>
         <form
           className="mt-6 space-y-4"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            navigate("/dashboard");
+            const data = new FormData(event.currentTarget);
+            if (data.get("password") !== data.get("password_confirmation")) return notify("As senhas não coincidem.", "error");
+            setLoading(true);
+            try {
+              const result = await api<{ tokens: Parameters<typeof saveTokens>[0] }>("/auth/register", { method: "POST", body: JSON.stringify({ full_name: data.get("full_name"), email: data.get("email"), password: data.get("password"), profile_type: data.get("profile_type") }) });
+              saveTokens(result.tokens); navigate("/dashboard");
+            } catch (error) { notify(error instanceof Error ? error.message : "Não foi possível criar a conta.", "error"); }
+            finally { setLoading(false); }
           }}
         >
           <Field label="Nome completo">
             <div className="relative">
               <User className="absolute left-3 top-2.5 h-5 w-5 text-slate-400" />
-              <input className={cn(inputClass, "pl-10")} placeholder="João Ferreira" />
+              <input name="full_name" className={cn(inputClass, "pl-10")} placeholder="Seu nome completo" required />
             </div>
           </Field>
           <Field label="E-mail">
-            <input className={inputClass} type="email" placeholder="joao@exemplo.com.br" />
+            <input name="email" className={inputClass} type="email" placeholder="voce@exemplo.com.br" required />
           </Field>
           <Field label="Senha">
-            <input className={inputClass} type="password" placeholder="Mínimo 8 caracteres" />
+            <input name="password" className={inputClass} type="password" placeholder="8+ caracteres, maiúscula, número e símbolo" required />
             <div className="mt-2 h-1.5 rounded-full bg-slate-100">
               <div className="h-full w-2/3 rounded-full bg-amber-500" />
             </div>
             <p className="mt-1 text-xs text-amber-700">Força média</p>
           </Field>
           <Field label="Confirmar senha">
-            <input className={inputClass} type="password" />
+            <input name="password_confirmation" className={inputClass} type="password" required />
           </Field>
           <Field label="Perfil de uso">
-            <select className={inputClass}>
-              <option>Pessoa Física</option>
-              <option>MEI / Autônomo</option>
-              <option>Empresa (PME)</option>
+            <select name="profile_type" className={inputClass}>
+              <option value="personal">Pessoa Física</option>
+              <option value="self_employed">MEI / Autônomo</option>
+              <option value="business">Empresa (PME)</option>
             </select>
           </Field>
           <label className="flex items-start gap-2 text-sm text-slate-600">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary" />
+            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-slate-300 text-primary" required />
             Concordo com os Termos de Uso e Política de Privacidade
           </label>
-          <Button className="w-full" type="submit">
-            Criar conta
+          <Button className="w-full" type="submit" disabled={loading}>
+            {loading ? "Criando conta..." : "Criar conta"}
           </Button>
           <div className="grid grid-cols-2 gap-3">
-            <Button type="button" variant="outline">
+            <Button type="button" variant="outline" disabled title="Configure OAuth no backend para habilitar">
               G Google
             </Button>
-            <Button type="button" variant="outline" icon={Github}>
+            <Button type="button" variant="outline" icon={Github} disabled title="Configure OAuth no backend para habilitar">
               GitHub
             </Button>
           </div>
@@ -175,6 +201,12 @@ export function RegisterPage() {
 
 export function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
+  const [email, setEmail] = useState("");
+  const { notify } = useFeedback();
+  async function send() {
+    try { await api("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }); setSent(true); }
+    catch (error) { notify(error instanceof Error ? error.message : "Falha ao enviar.", "error"); }
+  }
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg p-6">
       <Card className="w-full max-w-sm text-center shadow-soft">
@@ -194,10 +226,10 @@ export function ForgotPasswordPage() {
             <p className="mt-2 text-sm text-slate-500">Enviaremos um link de redefinição para seu e-mail.</p>
             <div className="mt-6 text-left">
               <Field label="E-mail cadastrado">
-                <input className={inputClass} type="email" />
+                <input className={inputClass} type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
               </Field>
             </div>
-            <Button className="mt-4 w-full" onClick={() => setSent(true)}>
+            <Button className="mt-4 w-full" onClick={send}>
               Enviar link de recuperação
             </Button>
           </>
@@ -211,22 +243,46 @@ export function ForgotPasswordPage() {
 }
 
 export function TwoFactorPage() {
+  const navigate = useNavigate();
+  const { notify } = useFeedback();
+  const [code, setCode] = useState("");
+  async function verify() {
+    const challenge_token = sessionStorage.getItem("two_factor_challenge");
+    if (!challenge_token) return navigate("/login");
+    try {
+      const result = await api<{ tokens: Parameters<typeof saveTokens>[0] }>("/auth/2fa/login", { method: "POST", body: JSON.stringify({ challenge_token, code }) });
+      saveTokens(result.tokens); sessionStorage.removeItem("two_factor_challenge"); navigate("/dashboard");
+    } catch (error) { notify(error instanceof Error ? error.message : "Código inválido.", "error"); }
+  }
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg p-6">
       <Card className="w-full max-w-sm text-center shadow-soft">
         <Shield className="mx-auto h-12 w-12 text-primary" />
         <h1 className="mt-4 text-2xl font-semibold">Verificação em dois fatores</h1>
         <p className="mt-2 text-sm text-slate-500">Digite o código de 6 dígitos do seu aplicativo autenticador.</p>
-        <div className="mt-6 grid grid-cols-6 gap-2">
-          {Array.from({ length: 6 }).map((_, index) => (
-            <input key={index} className="focus-ring h-12 rounded-lg border bg-white text-center text-lg font-semibold" maxLength={1} />
-          ))}
-        </div>
-        <Button className="mt-6 w-full">Verificar</Button>
+        <input className={cn(inputClass, "mt-6 text-center text-xl tracking-[0.4em]")} inputMode="numeric" autoFocus maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} />
+        <Button className="mt-6 w-full" onClick={verify} disabled={code.length !== 6}>Verificar</Button>
         <Link className="mt-4 block text-sm font-medium text-primary" to="/login">
           Voltar
         </Link>
       </Card>
     </main>
   );
+}
+
+export function ResetPasswordPage() {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const { notify } = useFeedback();
+  const [loading, setLoading] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    if (data.get("password") !== data.get("confirmation")) return notify("As senhas não coincidem.", "error");
+    setLoading(true);
+    try { await api("/auth/reset-password", { method: "POST", body: JSON.stringify({ token: params.get("token"), password: data.get("password") }) }); notify("Senha redefinida com sucesso."); navigate("/login"); }
+    catch (error) { notify(error instanceof Error ? error.message : "Não foi possível redefinir a senha.", "error"); }
+    finally { setLoading(false); }
+  }
+  return <main className="flex min-h-screen items-center justify-center bg-bg p-6"><Card className="w-full max-w-sm shadow-soft"><h1 className="text-2xl font-semibold">Criar nova senha</h1><form className="mt-6 space-y-4" onSubmit={submit}><Field label="Nova senha"><input name="password" className={inputClass} type="password" required /></Field><Field label="Confirmar senha"><input name="confirmation" className={inputClass} type="password" required /></Field><Button className="w-full" type="submit" disabled={loading}>{loading ? "Salvando..." : "Redefinir senha"}</Button></form></Card></main>;
 }

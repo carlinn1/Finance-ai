@@ -16,11 +16,11 @@ import {
   Target,
   X,
 } from "lucide-react";
-import { Badge } from "../components/ui";
+import { Badge, LoadingSpinner } from "../components/ui";
 import { cn } from "../lib/format";
 import { useFeedback } from "../components/feedback";
 import { BrandLogo } from "../components/BrandLogo";
-import { getProfilePhoto, PROFILE_PHOTO_EVENT } from "../lib/profile";
+import { api, clearTokens, hasSession, type User as SessionUser } from "../lib/api";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -35,24 +35,38 @@ const navItems = [
 export default function AuthenticatedLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [profilePhoto, setProfilePhoto] = useState<string | null>(() => getProfilePhoto());
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
   const { notify } = useFeedback();
 
   useEffect(() => {
-    const updatePhoto = (event: Event) => setProfilePhoto((event as CustomEvent<string | null>).detail);
-    window.addEventListener(PROFILE_PHOTO_EVENT, updatePhoto);
-    return () => window.removeEventListener(PROFILE_PHOTO_EVENT, updatePhoto);
-  }, []);
+    const loadUser = async () => {
+      if (!hasSession()) { navigate("/login", { replace: true }); setCheckingSession(false); return; }
+      try { setSessionUser(await api<SessionUser>("/users/me")); }
+      catch { clearTokens(); navigate("/login", { replace: true }); }
+      finally { setCheckingSession(false); }
+    };
+    const expired = () => { clearTokens(); navigate("/login", { replace: true }); };
+    void loadUser();
+    window.addEventListener("financeai:user-updated", loadUser);
+    window.addEventListener("financeai:session-expired", expired);
+    return () => { window.removeEventListener("financeai:user-updated", loadUser); window.removeEventListener("financeai:session-expired", expired); };
+  }, [navigate]);
 
-  function logout() {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
+  async function logout() {
+    const refresh_token = localStorage.getItem("refresh_token");
+    try { await api("/auth/logout", { method: "POST", body: JSON.stringify({ refresh_token }) }); } catch { /* sessão local também deve ser encerrada */ }
+    clearTokens();
     sessionStorage.clear();
     notify("Sessão encerrada com segurança.");
     navigate("/login", { replace: true });
   }
 
+  if (checkingSession) return <LoadingSpinner />;
+  if (!sessionUser) return null;
+
+  const initials = sessionUser.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   return (
     <div className={cn("min-h-screen bg-slate-50 lg:grid", collapsed ? "lg:grid-cols-[80px_1fr]" : "lg:grid-cols-[248px_1fr]")}> 
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-white/95 px-4 backdrop-blur lg:hidden">
@@ -120,10 +134,10 @@ export default function AuthenticatedLayout() {
             <span className={cn(collapsed && "lg:hidden")}>Configurações</span>
           </NavLink>
           <div className={cn("flex items-center gap-3 rounded-lg border bg-slate-50 p-3", collapsed && "lg:justify-center lg:border-0 lg:bg-transparent lg:p-0")}>
-            {profilePhoto ? <img src={profilePhoto} alt="Foto de João Ferreira" className="h-10 w-10 shrink-0 rounded-full object-cover ring-2 ring-white" /> : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-semibold text-white">JF</div>}
+            {sessionUser.avatar_url ? <img src={sessionUser.avatar_url} alt={`Foto de ${sessionUser.full_name}`} className="h-10 w-10 shrink-0 rounded-full object-cover ring-2 ring-white" /> : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-semibold text-white">{initials}</div>}
             <div className={cn("min-w-0", collapsed && "lg:hidden")}>
-              <p className="truncate text-sm font-semibold text-slate-900">João Ferreira</p>
-              <p className="mt-0.5 text-xs text-emerald-700">Licença completa</p>
+              <p className="truncate text-sm font-semibold text-slate-900">{sessionUser.full_name}</p>
+              <p className="mt-0.5 text-xs text-emerald-700">Sessão protegida</p>
             </div>
           </div>
           <button onClick={logout} title={collapsed ? "Sair da conta" : undefined} className={cn("mt-2 flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:bg-red-50 hover:text-red-700", collapsed && "lg:justify-center lg:px-0")}>
